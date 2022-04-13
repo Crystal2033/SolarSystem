@@ -43,8 +43,9 @@ class MovementManager:
         planet_orbit = planet.get_orbit()
 
         # Находим время, удобное для связи с углом.
-        self.time = int((self.time + self.delta_time) % 360)
-        angle = math.radians(self.time)  # angle in radians
+        satellite.rotate_timer = int((satellite.rotate_timer + satellite.get_delta_rot_angle()) % 360)
+        # self.time = int((self.time + self.delta_time) % 360)
+        angle = math.radians(satellite.rotate_timer)  # angle in radians
 
         planet_orbit.move_satellite(angle, planet)
 
@@ -66,7 +67,8 @@ class CelestialObject:
         self.pos_z = None
         self.color = None
         self.orbit = None
-        # self.rotate_speed = 1
+        self.delta_rotate_angle = 1
+        self.rotate_timer = 0
 
         self.axle_rotate_angle_x = 0
         self.axle_rotate_angle_y = 0
@@ -107,11 +109,11 @@ class CelestialObject:
     def get_pos_z(self):
         return self.position_z
 
-    # def set_rotate_speed(self, speed):
-    #     self.rotate_speed = speed
-    #
-    # def get_rotate_speed(self):
-    #     return self.rotate_speed
+    def set_delta_rot_angle(self, angle_delta):
+        self.delta_rotate_angle = angle_delta
+
+    def get_delta_rot_angle(self):
+        return self.delta_rotate_angle
 
 
     def set_satellite(self, satelite):
@@ -372,13 +374,6 @@ class Orbit:
         return self.orbit_tilt
 
 
-# Слот для timer
-def update():
-    movement_manager = MovementManager()
-    movement_manager.make_movement(earth, moon)
-    # movement_manager.make_movement(sun, earth)
-
-
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
     # surface grid z axis
@@ -400,14 +395,14 @@ if __name__ == "__main__":
 
     earth = CelestialObject()
     earth_color = (0.098, 0.49, 0.345, 1.0)
-    earth.create_sphere(6, earth_color, (0, 0, 0), window)
-    earth.set_orbit_params(window, 30, 27, 0)
-    # earth.set_rotate_speed(1)
+    earth.create_sphere(6, earth_color, (-20, -20, -20), window)
+    earth.set_orbit_params(window, 30, 27, -45)
+    earth.set_delta_rot_angle(1)
 
     moon = CelestialObject()
     moon_color = (0.26, 0.26, 0.26, 1.0)
-    moon.create_sphere(1, moon_color, (0, 0, 0), window)
-    # moon.set_rotate_speed(1)
+    moon.create_sphere(1, moon_color, (50, 50, 50), window)
+    moon.set_delta_rot_angle(4)
     earth.set_satellite(moon)
 
     sun = CelestialObject()
