@@ -7,29 +7,6 @@ import pyqtgraph.opengl as gl
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 
-# CONSTANTS
-time_global = 0
-time_global_delta_angle = 1
-axle_rotate_angle_z = 0
-#  CONSTANTS
-
-
-class ObjectsCollector:
-    def __init__(self):
-        self.list_of_plots = []
-        self.list_of_plots_pos = []
-
-    def insert_item_and_pos(self, plot, plot_pos):
-        self.list_of_plots.append(plot)
-        self.list_of_plots_pos.append(plot_pos)
-
-    def get_plots(self):
-        return self.list_of_plots
-
-    def get_plots_poses(self):
-        return self.list_of_plots_pos
-
-
 class Rotator:
     # angles -- [x, y, z]
     @staticmethod
@@ -49,62 +26,32 @@ class Rotator:
 
 
 class MovementManager:
-    @staticmethod
-    def make_movement(planet, satell_planet):
-        global time_global
-        global time_global_delta_angle
-        global axle_rotate_angle_z
-        # Находим данные об орбите небесного тела.
-        orbit_a = planet.get_orbit().get_orbit_a()
-        orbit_b = planet.get_orbit().get_orbit_b()
-        # planet.get_orbit().set_celestian(satell_planet)
+    def __init__(self):
+        self.time = 0
+        self.delta_time = 1
+        self.dx = 0
+        self.dy = 0
+        self.dz = 0
+        # self.rotate_delta_z = 0
+
+    def update(self):
+        self.make_movement(sun, earth)
+
+        self.make_movement(earth, moon)
+
+    def make_movement(self, planet, satellite):
+        planet_orbit = planet.get_orbit()
+
         # Находим время, удобное для связи с углом.
-        time_global = int((time_global + time_global_delta_angle) % 360)
-        angle1 = (time_global * math.pi) / 180  # angle1 in radians
+        self.time = int((self.time + self.delta_time) % 360)
+        angle = math.radians(self.time)  # angle in radians
 
-        # Находим точки орбиты.
-        x_orbit = orbit_a * math.cos(angle1) - planet.get_orbit().linear_eccentricity
-        y_orbit = orbit_b * math.sin(angle1)
+        planet_orbit.move_satellite(angle, planet)
 
-        # Задаем углы вращения небесных тел.
-        axle_rotate_angle_x = 0
-        axle_rotate_angle_y = 0
-        axle_rotation_angle_per_t = 5
-        axle_rotate_angle_z = (axle_rotate_angle_z + math.radians(axle_rotation_angle_per_t)) % (2 * math.pi)
-        angles = [axle_rotate_angle_x, axle_rotate_angle_y, axle_rotate_angle_z]
-        rotator = Rotator()
-        x, y, z = rotator.get_rotate_matrixes(angles)
-
-        rot_mat = np.dot(np.dot(z, x), z)
-        # движение широт и долгот
-        for plt1, plt1_pos in zip(satell_planet.collector.get_plots(), satell_planet.collector.get_plots_poses()):
-            pos1 = plt1_pos.copy()
-            # 2 - Вращение спутника вокруг оси
-            pos1 = np.dot(pos1, rot_mat)
-
-            # 4 - Движение спутника по орбите
-            pos1 = np.add(pos1, [x_orbit, y_orbit, 0])
-
-            # 5 - Наклон орбиты
-            pos1 = np.dot(pos1, planet.get_orbit().get_orbit_tilt_matrix())
-            # Установка новых координат
-
-            # pos1 = np.add(pos1, [satell_planet.position_x, satell_planet.position_y, satell_planet.position_z])
-            plt1.setData(pos=pos1)
-
-        # сферы
-        verts = satell_planet.sphere_meshdata.vertexes().copy()
-        md = gl.MeshData(vertexes=verts, faces=satell_planet.sphere_meshdata.faces(),
-                         edges=satell_planet.sphere_meshdata.edges(),
-                         vertexColors=satell_planet.sphere_meshdata.vertexColors(),
-                         faceColors=satell_planet.sphere_meshdata.faceColors())
-        verts = np.dot(verts, rot_mat)
-        # Движение Земли по орбите
-        verts = np.add(verts, [x_orbit, y_orbit, 0])
-        # Наклон орбиты
-        verts = np.dot(verts, planet.get_orbit().get_orbit_tilt_matrix())
-        md.setVertexes(verts)
-        satell_planet.sphere_meshitem.setMeshData(meshdata=md)
+        # planet.move_sphere_to_pos(self.dx, self.dy, 0, [0,0,0])
+        # self.dx += 1
+        # self.dy += 1
+        # self.dz += 1
 
 
 class CelestialObject:
@@ -112,14 +59,18 @@ class CelestialObject:
         self.sphere_meshdata = None  # Data about sphere. Info about it.
         self.sphere_meshitem = None  # Sphere itself
         self.radius = None
-        self.latitudes = []  # широта
-        self.longitudes = []  # долгота
-        self.position_x = None
-        self.position_y = None
-        self.position_z = None
-        self.collector = ObjectsCollector()
+        self.plots = []
+        self.plots_pos = []
+        self.pos_x = None
+        self.pos_y = None
+        self.pos_z = None
         self.color = None
         self.orbit = None
+        # self.rotate_speed = 1
+
+        self.axle_rotate_angle_x = 0
+        self.axle_rotate_angle_y = 0
+        self.axle_rotate_angle_z = 0
 
     def create_sphere(self, radius, sphere_color, global_position, _window):
         # Метод создает небесную сферу и устанавливает долготы и широты для того, чтобы видеть вращение.
@@ -127,89 +78,53 @@ class CelestialObject:
         self.color = sphere_color
         self.sphere_meshdata = gl.MeshData.sphere(radius=radius, rows=100, cols=100)
         self.sphere_meshitem = gl.GLMeshItem(meshdata=self.sphere_meshdata, smooth=False, color=self.color)
-        self.position_x = global_position[0]
-        self.position_y = global_position[1]
-        self.position_z = global_position[2]
-        self.sphere_meshitem.translate(self.position_x, self.position_y, self.position_z)
-        self.sphere_meshitem.setGLOptions('additive')  # opaque
+        self.pos_x = global_position[0]
+        self.pos_y = global_position[1]
+        self.pos_z = global_position[2]
         self.add_long_and_lati(_window)
+        self.move_sphere_to_pos(self.pos_x, self.pos_y, self.pos_z, [0, 0, 0])
+        self.sphere_meshitem.setGLOptions('opaque')  # opaque
+        _window.addItem(self.sphere_meshitem)
+
 
     def set_orbit_params(self, _window, orbit_a, orbit_b, orbit_tilt_angle=0, orbit_color=(0.015, 0.67, 0.82, 1.)):
         # Метод устанавливает параметры орбиты и создает орбиту. Также поворачивает орбиту на заданный угол
         self.orbit = Orbit()
         self.orbit.set_orbit_tilt(orbit_tilt_angle)
-        position = [self.position_x, self.position_y, self.position_z]
+        position = [self.pos_x, self.pos_y, self.pos_z]
         self.orbit.create_orbit(_window, orbit_a, orbit_b, orbit_color, position)
 
-    def get_collector(self):
-        return self.collector
 
     def get_meshitem(self):
         return self.sphere_meshitem
 
-    def get_pos_z(self):
-        return self.position_z
+    def get_pos_x(self):
+        return self.position_x
 
     def get_pos_y(self):
         return self.position_y
 
-    def get_pos_x(self):
-        return self.position_x
+    def get_pos_z(self):
+        return self.position_z
 
-    def set_pos(self, pos):
-        self.position_x = pos[0]
-        self.position_y = pos[1]
-        self.position_z = pos[2]
+    # def set_rotate_speed(self, speed):
+    #     self.rotate_speed = speed
+    #
+    # def get_rotate_speed(self):
+    #     return self.rotate_speed
 
-    def set_satellite(self, satellite):
-        # Данный метод позволяет небесному телу установить себе спутник. Причем центр спутника изначально
-        # Причем центр спутника будет переведен в центр планеты. А потом уже все будет отрисовано в зависимости от
-        # расположения орбиты. Перемещает на разницу между двумя объектами
-        # (очевидно, для перемещения спутнкка в центр планеты).
 
-        if self.get_orbit():
-            self.get_orbit().set_celestian_on_orbit(satellite)
-
-        shifted_pos = [self.position_x - satellite.get_pos_x(),
-                       self.position_y - satellite.get_pos_y(),
-                       self.position_z - satellite.get_pos_z()]
-        self_pos = [self.position_x, self.position_y, self.position_z]
-        satellite.set_pos(self_pos)
-
-        plots = satellite.get_collector().get_plots()
-        # Переносим широты и долготы в нужное место: центр планеты.
-        for plot, plot_pos in zip(satellite.collector.get_plots(), satellite.collector.get_plots_poses()):
-            position = plot_pos.copy()
-            # смещение спутника в центр.
-            position = np.add(position, [shifted_pos[0], shifted_pos[1], shifted_pos[2]])
-            # Установка новых координат
-            plot.setData(pos=position)
-
-        # Переносим центр спутника в центр планеты, потом уже перерисуется спутник в нужном месте при движении.
-        # satellite.get_meshitem().translate(shifted_pos[0], shifted_pos[1], shifted_pos[2])
-
-        verts = satellite.sphere_meshdata.vertexes().copy()
-        md = gl.MeshData(vertexes=verts, faces=satellite.sphere_meshdata.faces(),
-                         edges=satellite.sphere_meshdata.edges(),
-                         vertexColors=satellite.sphere_meshdata.vertexColors(),
-                         faceColors=satellite.sphere_meshdata.faceColors())
-
-        # Смещаем спутник (планету-спутник) в центр планеты-родителя
-        verts = np.add(verts, [shifted_pos[0], shifted_pos[1], shifted_pos[2]])
-        md.setVertexes(verts)
-        # satellite.sphere_meshdata = md
-        satellite.sphere_meshitem.setMeshData(meshdata=md)
-
-        satellite_orbit = satellite.get_orbit()
-        if satellite_orbit:
-            satellite_from_satellite = satellite_orbit.get_satellite()
-            if satellite_from_satellite:
-                satellite.set_satellite(satellite_orbit.get_satellite())
-            # satellite_orbit.get_satellite()
+    def set_satellite(self, satelite):
+        '''
+        Метод ставит спутник на орбиту планеты (на плвванету)
+        '''
+        self.orbit.set_celestian(satelite, [self.pos_x, self.pos_y, self.pos_z])
 
     def add_long_and_lati(self, _window):
-        r = self.radius + 0.1
+        longitudes = []
+        latitudes = []
 
+        r = self.radius + 0.1
         phi_rng = np.linspace(0., 360., 360, endpoint=True)
         theta_rng = np.linspace(10., 170., 5, endpoint=True)
         cad = 0
@@ -222,21 +137,21 @@ class CelestialObject:
 
             i = 0
             # пересоздать массив - иначе будет только последний график
-            self.longitudes = np.ndarray(shape=(phi_rng.size, 3), dtype=np.float32)
+            longitudes = np.ndarray(shape=(phi_rng.size, 3), dtype=np.float32)
 
             for phi in phi_rng:
                 angle2 = (math.pi * phi) / 180
                 x = r * math.cos(angle2) * theta_sin  ## CHANGED  +++ self.position_x, self.position_y, self.position_z
                 y = r * math.sin(angle2) * theta_sin
                 z = r * theta_cos
-                self.longitudes[i] = [x, y, z]
+                longitudes[i] = [x, y, z]
                 i = i + 1
 
             cad = cad + int(255 / theta_rng.size)
-            plt = gl.GLLinePlotItem(pos=self.longitudes, color=pg.glColor(250, cad, cad))
-            plt.translate(self.position_x, self.position_y, self.position_z)
+            plt = gl.GLLinePlotItem(pos=longitudes, color=pg.glColor(250, cad, cad))
             plt.setGLOptions('opaque')
-            self.collector.insert_item_and_pos(plt, plt.pos)
+            self.plots.append(plt)
+            self.plots_pos.append(plt.pos)
             _window.addItem(plt)
 
         phi_rng = np.linspace(0, 180, 2, endpoint=False)
@@ -250,39 +165,106 @@ class CelestialObject:
 
             i = 0
             # пересоздать массив - иначе будет только последний график
-            self.latitudes = np.ndarray((theta_rng.size, 3), dtype=np.float32)
+            latitudes = np.ndarray((theta_rng.size, 3), dtype=np.float32)
 
             for theta in theta_rng:
                 angle = (math.pi * theta) / 180
                 x = r * math.sin(angle) * phi_cos  # CHANGED  +++ self.position_x, self.position_y, self.position_z
                 y = r * math.sin(angle) * phi_sin
                 z = r * math.cos(angle)
-                self.latitudes[i] = [x, y, z]
+                latitudes[i] = [x, y, z]
                 i = i + 1
 
             cad = cad + (1. / phi_rng.size)
-            plt = gl.GLLinePlotItem(pos=self.latitudes, color=(cad, 1., cad, 1.))
-            plt.translate(self.position_x, self.position_y, self.position_z)
+            plt = gl.GLLinePlotItem(pos=latitudes, color=(cad, 1., cad, 1.))
             plt.setGLOptions('opaque')
-            self.collector.insert_item_and_pos(plt, plt.pos)
+            self.plots.append(plt)
+            self.plots_pos.append(plt.pos)
             _window.addItem(plt)
+
+    def move_long_and_lati(self, pos_x, pos_y, pos_z, angles, parent_planet=None):
+        parent_orbit = None
+        if parent_planet:
+            parent_orbit = parent_planet.get_orbit()
+        self.pos_x = pos_x if not parent_planet else pos_x + parent_planet.pos_x
+        self.pos_y = pos_y if not parent_planet else pos_y + parent_planet.pos_y
+        self.pos_z = pos_z if not parent_planet else pos_z + parent_planet.pos_z
+        rotator = Rotator()
+        x, y, z = rotator.get_rotate_matrixes(angles)
+        rot_mat = np.dot(np.dot(z, x), z)
+
+        for plot, plot_pos in zip(self.plots, self.plots_pos):
+            position = plot_pos.copy()
+            # Вращение спутника вокруг оси
+            position = np.dot(position, rot_mat)
+            # смещение спутника в центр.
+            position = np.add(position, [pos_x, pos_y, pos_z])
+            # Наклон орбиты
+            if parent_orbit:
+                position = np.dot(position, parent_orbit.get_orbit_tilt_matrix())
+                position = np.add(position, [parent_planet.pos_x, parent_planet.pos_y, parent_planet.pos_z])
+            # Установка новых координат
+            plot.setData(pos=position)
+
+    def move_sphere_to_pos(self, gl_pos_x, gl_pos_y, gl_pos_z, angles, parent_planet=None):
+        parent_orbit = None
+        if parent_planet:
+            parent_orbit = parent_planet.get_orbit()
+
+        self.pos_x = gl_pos_x if not parent_planet else gl_pos_x + parent_planet.pos_x
+        self.pos_y = gl_pos_y if not parent_planet else gl_pos_y + parent_planet.pos_y
+        self.pos_z = gl_pos_z if not parent_planet else gl_pos_z + parent_planet.pos_z
+        # print("================================")
+        # print("X = ", self.pos_x)
+        # print("Y = ", self.pos_y)
+        # print("Z = ", self.pos_z)
+        # print("================================")
+        rotator = Rotator()
+        x, y, z = rotator.get_rotate_matrixes(angles)
+        rot_mat = np.dot(np.dot(z, x), z)
+        verts = self.sphere_meshdata.vertexes().copy()
+        md = gl.MeshData(vertexes=verts, faces=self.sphere_meshdata.faces(),
+                         edges=self.sphere_meshdata.edges(),
+                         vertexColors=self.sphere_meshdata.vertexColors(),
+                         faceColors=self.sphere_meshdata.faceColors())
+
+        verts = np.dot(verts, rot_mat)
+        # Смещаем спутник (планету-спутник) в центр планеты-родителя
+        # verts = np.add(verts, [self.pos_x, self.pos_y, self.pos_z])
+        verts = np.add(verts, [gl_pos_x, gl_pos_y, gl_pos_z])
+        # Наклон орбиты
+        if parent_orbit:
+            verts = np.dot(verts, parent_orbit.get_orbit_tilt_matrix())
+            verts = np.add(verts, [parent_planet.pos_x, parent_planet.pos_y, parent_planet.pos_z])
+
+
+        md.setVertexes(verts)
+        self.sphere_meshitem.setMeshData(meshdata=md)
+
+        if self.orbit:
+            self.orbit.move_orbit_to_pos(self.pos_x, self.pos_y, self.pos_z)
+
+        self.move_long_and_lati(gl_pos_x, gl_pos_y, gl_pos_z, angles, parent_planet)
 
     def get_orbit(self):
         return self.orbit
 
 
+
 class Orbit:
     def __init__(self):
         self.phi_rng = np.linspace(0, 360, 37)
+        self.orbit_points = np.ndarray((self.phi_rng.size, 3), dtype=np.float32)
+
         self.orbit_a = None
         self.orbit_b = None
         self.linear_eccentricity = None
-        self.orbit_tilt = None  # rotate matrix
+        self.orbit_tilt = None  # Euler rotate matrix
         self.angle = None
-        self.orbit_points = np.ndarray((self.phi_rng.size, 3), dtype=np.float32)
-        self.center_pos_x = None
-        self.center_pos_y = None
-        self.center_pos_z = None
+
+        self.pos_x = None
+        self.pos_y = None
+        self.pos_z = None
         self.orbit_obj = None
         self.celestian_obj = None
 
@@ -292,55 +274,98 @@ class Orbit:
     def get_orbit_b(self):
         return self.orbit_b
 
-    def get_satellite(self):
+    def get_celestian(self):
         return self.celestian_obj
 
-    def set_celestian_on_orbit(self, new_satellite):
+    def move_orbit_to_pos(self, gl_pos_x, gl_pos_y, gl_pos_z):
+        tmp = np.add(self.orbit_points, [gl_pos_x - self.linear_eccentricity , gl_pos_y, gl_pos_z])
+        self.orbit_obj.setData(pos=tmp)
+
+    def set_celestian(self, new_satellite, parent_planet_pos):
+        '''
+        Ставит спутник на орбиту (не принципиально, но для статичной картинки без таймера -- хорошо)
+        Также орбите задает дочерний элемент (объект, движущийся по орбите).
+        '''
         self.celestian_obj = new_satellite
+        if self.orbit_obj:
+            new_satellite.move_sphere_to_pos(self.orbit_points[0][0] + parent_planet_pos[0],
+                                             self.orbit_points[0][1] + parent_planet_pos[1],
+                                             self.orbit_points[0][2] + parent_planet_pos[2],
+                                             [0, 0, 0])
 
     def get_orbit_obj(self):
         return self.orbit_obj
 
+    def move_satellite(self, angle_delta, parent_planet):
+        '''
+        Двигает свой дочерний объект по своим координатам на малый заданный угол rotate_angle.
+        '''
+        x_orbit = self.orbit_a * math.cos(angle_delta)# - self.linear_eccentricity
+        y_orbit = self.orbit_b * math.sin(angle_delta)
+        # TODO:  Думаю, что углы должны быть не тут
+        axle_rotation_angle_per_t = 1
+
+        if self.celestian_obj:
+            self.celestian_obj.axle_rotate_angle_z = (self.celestian_obj.axle_rotate_angle_z +
+                                                      math.radians(axle_rotation_angle_per_t)) % (2 * math.pi)
+            angles = [self.celestian_obj.axle_rotate_angle_x,
+                      self.celestian_obj.axle_rotate_angle_y,
+                      self.celestian_obj.axle_rotate_angle_z]
+
+            self.celestian_obj.move_sphere_to_pos(x_orbit - self.linear_eccentricity, y_orbit, 0, angles, parent_planet)
+
     def set_orbit_tilt(self, angle):
+        '''
+        Функция составляет матрицу трех поворотов Эйлера для заданного угла.
+
+        '''
         orbit_tilt_angles = [math.radians(angle), 0, 0]
         self.angle = angle
         rotator = Rotator()
         x, y, z = rotator.get_rotate_matrixes(orbit_tilt_angles)
 
-        # Поворот на угол Эйлера, хотя в нашей задаче проблемы схлопывания плоскотей нет.
+        # Поворот на угол Эйлера, хотя в нашей задаче проблемы схлопывания плоскоcтей нет.
         self.orbit_tilt = np.dot(np.dot(z, x), z)
 
     def create_orbit(self, _window, orbit_a, orbit_b, color, celestian_pos):
-        # assert orbit_a < orbit_b, "The value of orbit_a has to be greater than orbit_b."
+        '''
+        Функция инициализирует орбиту. Задает положение в пространстве, устанавливает инфомрацию об орбите,
+        поворачивает точки орбиты в соответствии с заданным углом и уже имеющейся матрицы поворота на углы Эйлера
+        orbit_tilt.
+        '''
         if orbit_a < orbit_b:
             print("The value of orbit_a has to be greater than orbit_b.")
             exit(-1)
         i = 0
-        # self.celestian_obj = celestian
 
-        self.center_pos_x = celestian_pos[0]
-        self.center_pos_y = celestian_pos[1]
-        self.center_pos_z = celestian_pos[2]
+        self.pos_x = celestian_pos[0]
+        self.pos_y = celestian_pos[1]
+        self.pos_z = celestian_pos[2]
+
         self.orbit_a = orbit_a
         self.orbit_b = orbit_b
         self.linear_eccentricity = math.sqrt(float(math.pow(self.orbit_a, 2)) - float(math.pow(self.orbit_b, 2)))
 
+        # Отрисовка орбиты
         for phi in self.phi_rng:
             angl = math.radians(phi)
+            # Переменные без учета смещения в пространстве.
             x = self.orbit_a * math.cos(angl)
             y = self.orbit_b * math.sin(angl)
             z = 0
             self.orbit_points[i] = [x, y, z]
             # print(phi, angl, x, y)
             i = i + 1
+
+        # Получим значения точек орбиты после поворота.
         self.orbit_points = np.dot(self.orbit_points, self.orbit_tilt)
 
-        for point in self.orbit_points:
-            point[0] = point[0] + self.center_pos_x - self.linear_eccentricity  # xshift На нас, не трогать X
-            point[1] = point[1] + self.center_pos_y  # y
-            point[2] = point[2] + self.center_pos_z  # z_shift Z
+        # self.orbit_points
 
-        self.orbit_obj = gl.GLLinePlotItem(pos=self.orbit_points, color=color)
+        temp_points = np.add(self.orbit_points, [self.pos_x - self.linear_eccentricity,
+                                                       self.pos_y,  self.pos_z])
+
+        self.orbit_obj = gl.GLLinePlotItem(pos=temp_points, color=color)
         _window.addItem(self.orbit_obj)
 
     def get_orbit_tilt_matrix(self):
@@ -375,17 +400,31 @@ if __name__ == "__main__":
 
     earth = CelestialObject()
     earth_color = (0.098, 0.49, 0.345, 1.0)
-
-    earth.create_sphere(6, earth_color, (100, 100, 100), window)
+    earth.create_sphere(6, earth_color, (0, 0, 0), window)
     earth.set_orbit_params(window, 30, 27, 0)
-    window.addItem(earth.sphere_meshitem)
+    # earth.set_rotate_speed(1)
 
     moon = CelestialObject()
     moon_color = (0.26, 0.26, 0.26, 1.0)
-    moon.create_sphere(1, moon_color, (20, 20, 20), window)
-
+    moon.create_sphere(1, moon_color, (0, 0, 0), window)
+    # moon.set_rotate_speed(1)
     earth.set_satellite(moon)
-    window.addItem(moon.sphere_meshitem)
+
+    sun = CelestialObject()
+    sun_color = (1., 0.5, 0., 1.0)
+    sun.create_sphere(19, sun_color, (40, 40, 40), window)
+    sun.set_orbit_params(window, 80, 70, 0)
+    sun.set_satellite(earth)
+
+    # earth.set_orbit_params(window, 30, 27, 0)
+    # window.addItem(earth.sphere_meshitem)
+    #
+    # moon = CelestialObject()
+    # moon_color = (0.26, 0.26, 0.26, 1.0)
+    # moon.create_sphere(1, moon_color, (20, 20, 20), window)
+    #
+    # earth.set_satellite(moon)
+    # window.addItem(moon.sphere_meshitem)
 
     # sun = CelestialObject()
     # sun_color = (1., 0.5, 0., 1.0)
@@ -395,7 +434,9 @@ if __name__ == "__main__":
     # sun.set_satellite(earth)
     # window.addItem(sun.sphere_meshitem)
 
+    movement_manager = MovementManager()
+
     t = QtCore.QTimer()
-    t.timeout.connect(update)
+    t.timeout.connect(movement_manager.update)
     t.start(50)
     sys.exit(app.exec())
